@@ -36,28 +36,22 @@ SUBROUTINE read_file()
   USE klist,                ONLY : init_igk
   USE gvect,                ONLY : ngm, g
   USE gvecw,                ONLY : gcutw
-#if defined (__HDF5)
-  USE hdf5_qe
-#endif
   !
   IMPLICIT NONE 
   INTEGER :: ierr
   LOGICAL :: exst
-  CHARACTER( 256 )  :: dirname
+  CHARACTER( LEN=256 )  :: dirname
   !
   !
   ierr = 0 
   !
   ! ... Read the contents of the xml data file
   !
-  dirname = TRIM( tmp_dir ) // TRIM( prefix ) // '.save'
+  dirname = TRIM( tmp_dir ) // TRIM( prefix ) // '.save/'
   IF ( ionode ) WRITE( stdout, '(/,5x,A,/,5x,A)') &
      'Reading data from directory:', TRIM( dirname )
   !
   CALL read_xml_file ( )
-#if defined(__HDF5)
-  CALL initialize_hdf5()
-#endif
   !
   ! ... Open unit iunwfc, for Kohn-Sham orbitals - we assume that wfcs
   ! ... have been written to tmp_dir, not to a different directory!
@@ -113,14 +107,14 @@ SUBROUTINE read_xml_file ( )
   ! ... starting from scratch should be initialized here when restarting
   !
   USE kinds,                ONLY : DP
-  USE ions_base,            ONLY : nat, nsp, ityp, tau, if_pos, extfor
+  USE ions_base,            ONLY : nat, nsp, ityp, tau, extfor
   USE cell_base,            ONLY : tpiba2, alat,omega, at, bg, ibrav
   USE force_mod,            ONLY : force
   USE klist,                ONLY : nkstot, nks, xk, wk
   USE lsda_mod,             ONLY : lsda, nspin, current_spin, isk
   USE wvfct,                ONLY : nbnd, nbndx, et, wg
   USE symm_base,            ONLY : irt, d1, d2, d3, checkallsym, nsym
-  USE extfield,             ONLY : forcefield, tefield, monopole, forcemono
+  USE extfield,             ONLY : forcefield, tefield, gate, forcegate
   USE cellmd,               ONLY : cell_factor, lmovecell
   USE fft_base,             ONLY : dfftp
   USE fft_interfaces,       ONLY : fwfft
@@ -139,7 +133,8 @@ SUBROUTINE read_xml_file ( )
   USE pw_restart_new,       ONLY :  pw_readschema_file, init_vars_from_schema 
   USE qes_types_module,     ONLY :  output_type, parallel_info_type, general_info_type
   USE qes_libs_module,      ONLY :  qes_reset_output, qes_reset_input, qes_reset_general_info, qes_reset_parallel_info 
-  USE io_rho_xml,           ONLY : read_rho
+  USE io_rho_xml,           ONLY : read_scf
+  USE fft_rho,              ONLY : rho_g2r
   USE read_pseudo_mod,      ONLY : readpp
   USE uspp,                 ONLY : becsum
   USE uspp_param,           ONLY : upf
@@ -150,7 +145,8 @@ SUBROUTINE read_xml_file ( )
   USE funct,                ONLY : get_inlc, get_dft_name
   USE kernel_table,         ONLY : initialize_kernel_table
   USE esm,                  ONLY : do_comp_esm, esm_init
-  USE mp_bands,             ONLY : intra_bgrp_comm
+  USE mp_bands,             ONLY : intra_bgrp_comm, nyfft
+  USE Coul_cut_2D,          ONLY : do_cutoff_2D, cutoff_fact 
   !
   IMPLICIT NONE
 
@@ -174,6 +170,9 @@ SUBROUTINE read_xml_file ( )
   CALL errore( 'read_xml_file ', 'problem reading file ' // &
              & TRIM( tmp_dir ) // TRIM( prefix ) // '.save', ierr )
   !
+  CALL init_vars_from_schema( 'boundary_conditions',   ierr , output_obj, parinfo_obj, geninfo_obj )
+  CALL errore( 'read_xml_file ', 'problem reading file ' // &
+             & TRIM( tmp_dir ) // TRIM( prefix ) // '.save', ierr )
   ! ... allocate space for atomic positions, symmetries, forces
   !
   IF ( nat < 0 ) CALL errore( 'read_xml_file', 'wrong number of atoms', 1 )
@@ -182,18 +181,17 @@ SUBROUTINE read_xml_file ( )
   !
   ALLOCATE( ityp( nat ) )
   ALLOCATE( tau(    3, nat ) )
-  ALLOCATE( if_pos( 3, nat ) )
   ALLOCATE( force(  3, nat ) )
   ALLOCATE( extfor(  3, nat ) )
   !
   IF ( tefield ) ALLOCATE( forcefield( 3, nat ) )
-  IF ( monopole ) ALLOCATE( forcemono( 3, nat ) ) ! TB
+  IF ( gate ) ALLOCATE( forcegate( 3, nat ) ) ! TB
   !
   ALLOCATE( irt( 48, nat ) )
   !
   CALL set_dimensions()
-  CALL fft_type_allocate ( dfftp, at, bg, gcutm, intra_bgrp_comm )
-  CALL fft_type_allocate ( dffts, at, bg, gcutms, intra_bgrp_comm)
+  CALL fft_type_allocate ( dfftp, at, bg, gcutm, intra_bgrp_comm, nyfft=nyfft )
+  CALL fft_type_allocate ( dffts, at, bg, gcutms, intra_bgrp_comm, nyfft=nyfft )
   !
   ! ... check whether LSDA
   !
@@ -303,11 +301,19 @@ SUBROUTINE read_xml_file ( )
   !
   ! ... read the charge density
   !
-  CALL read_rho( rho, nspin )
+  CALL read_scf( rho, nspin )
+#if ! defined (__OLDXML)
+  ! FIXME: for compatibility. rho was previously read and written in real space
+  ! FIXME: now it is in G space - to be removed together with old format
+  CALL rho_g2r ( rho%of_g, rho%of_r )
+#endif
   !
   ! ... re-calculate the local part of the pseudopotential vltot
   ! ... and the core correction charge (if any) - This is done here
   ! ... for compatibility with the previous version of read_file
+  !
+  !2D calculations: re-initialize cutoff fact before calculating potentials
+  IF(do_cutoff_2D) CALL cutoff_fact()
   !
   CALL init_vloc()
   CALL struc_fact( nat, tau, nsp, ityp, ngm, g, bg, dfftp%nr1, dfftp%nr2, &

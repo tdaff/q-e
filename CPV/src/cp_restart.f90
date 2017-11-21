@@ -27,7 +27,7 @@ MODULE cp_restart
   USE io_files,  ONLY : xmlpun, qexml_version, qexml_version_init
   USE xml_io_base, ONLY  : write_wfc
 #endif
-  USE xml_io_base,     ONLY  : read_wfc, write_rho_xml,read_print_counter, create_directory
+  USE xml_io_base,     ONLY  : read_wfc, write_rho, read_print_counter, create_directory
   !
   USE kinds,     ONLY : DP
   USE io_global, ONLY : ionode, ionode_id, stdout
@@ -61,7 +61,7 @@ MODULE cp_restart
                              vnhp, xnhp0, xnhpm, nhpcl, nhpdim, occ0, occm,  &
                              lambda0,lambdam, xnhe0, xnhem, vnhe, ekincm,    &
                              et, rho, c02, cm2, ctot, iupdwn, nupdwn,        &
-                             iupdwn_tot, nupdwn_tot, wfc, mat_z ) ! BS added wfc
+                             iupdwn_tot, nupdwn_tot, wfc ) ! BS added wfc
       !------------------------------------------------------------------------
       !
       USE control_flags,            ONLY : gamma_only, force_pairing, trhow, &
@@ -103,10 +103,11 @@ MODULE cp_restart
       USE uspp_param,               ONLY : n_atom_wfc, upf
       USE global_version,           ONLY : version_number
       USE cp_main_variables,        ONLY : descla
-      USE cp_interfaces,            ONLY : collect_lambda, collect_zmat
+      USE cp_interfaces,            ONLY : collect_lambda
       USE kernel_table,             ONLY : vdw_table_name, kernel_file_name
       USE london_module,            ONLY : scal6, lon_rcut, in_c6
       USE tsvdw_module,             ONLY : vdw_isolated, vdw_econv_thr
+      USE mytime,                   ONLY : f_wall
       !
       IMPLICIT NONE
       !
@@ -155,7 +156,6 @@ MODULE cp_restart
       INTEGER,               INTENT(IN) :: iupdwn_tot(:)! 
       INTEGER,               INTENT(IN) :: nupdwn_tot(:)! 
       REAL(DP),              INTENT(IN) :: wfc(:,:)     ! BS 
-      REAL(DP),    OPTIONAL, INTENT(IN) :: mat_z(:,:,:) ! 
       !
       LOGICAL               :: write_charge_density
       CHARACTER(LEN=20)     :: dft_name
@@ -177,7 +177,7 @@ MODULE cp_restart
       REAL(DP)              :: nelec
       REAL(DP)              :: scalef
       LOGICAL               :: lsda
-      REAL(DP)              :: s0, s1, cclock
+      REAL(DP)              :: s0, s1
       INTEGER               :: nbnd_tot
       INTEGER               :: natomwfc, nbnd_
       REAL(DP), ALLOCATABLE :: mrepl(:,:)
@@ -186,6 +186,7 @@ MODULE cp_restart
       INTEGER               :: inlc
       CHARACTER(iotk_attlenx)  :: attr
       REAL(DP), ALLOCATABLE :: temp_vec(:), wfc_temp(:,:) ! BS 
+      !
       !
       k1  = 0
       k2  = 0
@@ -263,7 +264,7 @@ MODULE cp_restart
       !
 #if !defined (__OLDXML)
       !
-      CALL errore('cp_restart','called in wrong case',1)
+      CALL errore('cp_writefile','called in wrong case',1)
       !
 #else
       !
@@ -309,7 +310,7 @@ MODULE cp_restart
          WRITE( stdout, '(/,3X,"writing restart file: ",A)' ) TRIM( dirname )
          !
          CALL qexml_init( iunpun )
-         CALL qexml_openfile( TRIM( dirname ) // '/' // TRIM( xmlpun ), &
+         CALL qexml_openfile( TRIM( dirname ) // TRIM( xmlpun ), &
                              & 'write', BINARY = .FALSE., IERR = ierr  )
          !
       END IF
@@ -318,7 +319,7 @@ MODULE cp_restart
       !
       CALL errore( 'cp_writefile ', 'cannot open restart file for writing', ierr )
       !
-      s0 = cclock()
+      s0 = f_wall()
       !
       IF ( ionode ) THEN
 
@@ -348,7 +349,7 @@ MODULE cp_restart
          !
          CALL qexml_write_cell( ibrav, celldm, alat, a1, a2, a3, b1, b2, b3, &
                           "Bohr","Bohr","2 pi / a", &
-                          do_makov_payne, .FALSE., .FALSE. )
+                          do_makov_payne, .FALSE., .FALSE., .FALSE. )
          !
 !-------------------------------------------------------------------------------
 ! ... IONS
@@ -418,52 +419,7 @@ MODULE cp_restart
 ! ... CHARGE-DENSITY
 !-------------------------------------------------------------------------------
       !
-      IF (write_charge_density) then
-         !
-         filename = 'charge-density'
-         !
-         IF ( ionode ) THEN
-              CALL iotk_link( iunpun, "CHARGE-DENSITY", filename, &
-              CREATE = .FALSE., BINARY = .TRUE. )
-         END IF
-         !
-         filename = TRIM( dirname ) // '/' // TRIM( filename )
-         !
-         IF ( nspin == 1 ) THEN
-            !
-            CALL write_rho_xml( filename, rho(:,1), &
-                                dfftp%nr1, dfftp%nr2, dfftp%nr3, dfftp%nr1x, dfftp%nr2x, &
-                                dfftp%ipp, dfftp%npp, ionode, intra_bgrp_comm, inter_bgrp_comm )
-            !
-         ELSE IF ( nspin == 2 ) THEN
-            !
-            ALLOCATE( rhoaux( SIZE( rho, 1 ) ) )
-            !
-            rhoaux = rho(:,1) + rho(:,2) 
-            !
-            CALL write_rho_xml( filename, rhoaux, &
-                                dfftp%nr1, dfftp%nr2, dfftp%nr3, dfftp%nr1x, dfftp%nr2x, &
-                                dfftp%ipp, dfftp%npp, ionode, intra_bgrp_comm, inter_bgrp_comm )
-            !
-            filename = 'spin-polarization'
-            !
-            IF ( ionode ) &
-                 CALL iotk_link( iunpun, "SPIN-POLARIZATION", filename, &
-                 CREATE = .FALSE., BINARY = .TRUE. )
-            !
-            filename = TRIM( dirname ) // '/' // TRIM( filename )
-            !
-            rhoaux = rho(:,1) - rho(:,2) 
-            !
-            CALL write_rho_xml( filename, rhoaux, &
-                                dfftp%nr1, dfftp%nr2, dfftp%nr3, dfftp%nr1x, dfftp%nr2x, &
-                                dfftp%ipp, dfftp%npp, ionode, intra_bgrp_comm, inter_bgrp_comm )
-            !
-            DEALLOCATE( rhoaux )
-            !
-         END IF
-         !
-      END IF ! write_charge_density
+      IF (write_charge_density) CALL write_rho ( dirname, rho, nspin )
       !
 !-------------------------------------------------------------------------------
 ! ... LDA+U OCCUPATIONS (compatibility with PWscf)
@@ -472,9 +428,7 @@ MODULE cp_restart
       IF ( lda_plus_u ) THEN
          !
          IF ( ionode ) THEN
-            i = LEN_TRIM( dirname )
-            ! ugly hack to remove .save from dirname
-            filename = dirname (1:i-4) // 'occup'
+            filename = dirname // 'occup'
             OPEN (UNIT=iunout,FILE=filename,FORM ='formatted',STATUS='unknown')
             WRITE( iunout, * , iostat = ierr) ns
          END IF
@@ -800,23 +754,6 @@ MODULE cp_restart
                !
             END IF
             !
-            IF( PRESENT( mat_z ) ) THEN
-               !
-               CALL collect_zmat( mrepl, mat_z(:,:,iss), descla(iss) )
-               !
-               IF ( ionode ) THEN
-                  !
-                  filename = TRIM( qexml_wfc_filename( ".", 'mat_z', ik, iss ) )
-                  !
-                  CALL iotk_link( iunpun, "MAT_Z" // TRIM( cspin ), &
-                                  filename, CREATE = .TRUE., BINARY = .TRUE. )
-                  !
-                  CALL iotk_write_dat( iunpun, "MAT_Z" // TRIM( cspin ), mrepl )
-                  !
-               END IF
-               !
-            END IF
-            !
             DEALLOCATE( mrepl )
             !
          END DO
@@ -910,7 +847,7 @@ MODULE cp_restart
       DEALLOCATE( tau  )
       DEALLOCATE( ityp )
       !
-      s1 = cclock() 
+      s1 = f_wall() 
       !
       IF ( ionode ) THEN
          !
@@ -929,7 +866,7 @@ MODULE cp_restart
                             taui, cdmi, stau0, svel0, staum, svelm, force,    &
                             vnhp, xnhp0, xnhpm, nhpcl,nhpdim,occ0, occm,      &
                             lambda0, lambdam, b1, b2, b3, xnhe0, xnhem, vnhe, &
-                            ekincm, c02, cm2, wfc, mat_z ) ! added wfc
+                            ekincm, c02, cm2, wfc ) ! added wfc
       !------------------------------------------------------------------------
       !
       USE control_flags,            ONLY : gamma_only, force_pairing, iverbosity, twfcollect, lwf ! BS added lwf
@@ -945,12 +882,13 @@ MODULE cp_restart
                                            sort_tau, ityp, ions_cofmass
       USE gvect,       ONLY : ig_l2g, mill
       USE cp_main_variables,        ONLY : nprint_nfi, descla
-      USE cp_interfaces,            ONLY : distribute_lambda, distribute_zmat
+      USE cp_interfaces,            ONLY : distribute_lambda
       USE mp,                       ONLY : mp_sum, mp_bcast
       USE mp_global,                ONLY : intra_image_comm, my_bgrp_id
       USE mp_global,                ONLY : root_bgrp, intra_bgrp_comm, inter_bgrp_comm, intra_pool_comm
       USE parameters,               ONLY : ntypx
       USE constants,                ONLY : eps8, angstrom_au, pi
+      USE mytime,                   ONLY : f_wall
       !
       IMPLICIT NONE
       !
@@ -995,7 +933,6 @@ MODULE cp_restart
       COMPLEX(DP),           INTENT(INOUT) :: c02(:,:)     ! 
       COMPLEX(DP),           INTENT(INOUT) :: cm2(:,:)     ! 
       REAL(DP),              INTENT(INOUT) :: wfc(:,:)     ! BS 
-      REAL(DP),    OPTIONAL, INTENT(INOUT) :: mat_z(:,:,:) ! 
       !
       CHARACTER(LEN=256)   :: dirname, kdirname, filename
       CHARACTER(LEN=5)     :: kindex
@@ -1034,7 +971,7 @@ MODULE cp_restart
       INTEGER,  ALLOCATABLE :: if_pos_(:,:) 
       CHARACTER(LEN=256)    :: psfile_(ntypx)
       CHARACTER(LEN=80)     :: pos_unit
-      REAL(DP)              :: s1, s0, cclock
+      REAL(DP)              :: s1, s0
       REAL(DP), ALLOCATABLE :: mrepl(:,:) 
       LOGICAL               :: exst, exist_wfc 
       CHARACTER(LEN=256)    :: tmp_dir_save
@@ -1048,7 +985,6 @@ MODULE cp_restart
                    'no free units to read wavefunctions', ierr )
       !
 #if !defined (__OLDXML)
-      !     
       CALL errore('cp_readfile','called in wrong case',1)
 #else
       kunit = 1
@@ -1061,15 +997,11 @@ MODULE cp_restart
       !
       IF ( ionode ) THEN
          !
-         !filename = TRIM( dirname ) // '/' // TRIM( xmlpun )
-         !
          WRITE( stdout, '(/,3X,"reading restart file: ",A)' ) TRIM( dirname )
-         !
-         !CALL iotk_open_read( iunpun, FILE = TRIM( filename ), IERR = ierr )
          !
          CALL qexml_init( iunpun )
          !
-         CALL qexml_openfile( TRIM( dirname ) // '/' // TRIM( xmlpun ), &
+         CALL qexml_openfile( TRIM( dirname ) // TRIM( xmlpun ), &
                               'read', BINARY = .FALSE., IERR = ierr  )
          !
       END IF
@@ -1079,7 +1011,7 @@ MODULE cp_restart
       CALL errore( 'cp_readfile', &
                    'cannot open restart file for reading', ierr )
       !
-      s0 = cclock()
+      s0 = f_wall()
       !
       IF ( ionode ) THEN
          !
@@ -1129,7 +1061,7 @@ MODULE cp_restart
       !
       IF ( ionode ) THEN
          !
-         filename = TRIM( dirname ) // '/' // TRIM( xmlpun )
+         filename = TRIM( dirname ) // TRIM( xmlpun )
          !
          CALL iotk_open_read( iunpun, FILE = TRIM( filename ), IERR = ierr )
          !
@@ -1639,22 +1571,6 @@ MODULE cp_restart
 
             CALL distribute_lambda( mrepl, lambdam(:,:,iss), descla(iss) )
             !
-            IF ( PRESENT( mat_z ) ) THEN
-               !
-               IF( ionode ) THEN
-                  CALL iotk_scan_dat( iunpun, "MAT_Z" // TRIM( iotk_index( iss ) ), mrepl, FOUND = found )
-                  IF( .NOT. found ) THEN
-                     WRITE( stdout, * ) 'WARNING mat_z not read from restart file'
-                     mrepl = 0.0d0
-                  END IF
-               END IF
-
-               CALL mp_bcast( mrepl, ionode_id, intra_image_comm )
-
-               CALL distribute_zmat( mrepl, mat_z(:,:,iss), descla(iss) )
-               !
-            END IF
-            !
             DEALLOCATE( mrepl )
             !
          END DO
@@ -1685,12 +1601,12 @@ MODULE cp_restart
                                                    &wfc(1:3, iupdwn(iss):iupdwn(iss) + nupdwn(iss) -1 ) )
                   !
                ENDDO
+               CALL iotk_scan_end(   iunpun, "WANNIER_CENTERS" )
                !
             ELSE
                WRITE( stdout, * ) 'WARNING wannier centers not read from restart file:'
             ENDIF
             !
-            CALL iotk_scan_end(   iunpun, "WANNIER_CENTERS" )
          END IF
          !
       END IF
@@ -1741,9 +1657,6 @@ MODULE cp_restart
       IF ( lwf ) CALL mp_bcast( wfc, ionode_id, intra_image_comm )
       !-------------------------------------------------------------------------
       !
-      IF ( PRESENT( mat_z ) ) &
-         CALL mp_bcast( mat_z(:,:,:), ionode_id, intra_image_comm )
-      !
       IF ( ionode ) &
          CALL iotk_close_read( iunpun )
       !
@@ -1778,7 +1691,7 @@ MODULE cp_restart
 
       END IF
       !
-      s1 = cclock()
+      s1 = f_wall()
       !
       IF ( ionode ) THEN
          !
@@ -1822,7 +1735,7 @@ MODULE cp_restart
       REAL(DP)           :: scalef
       !
 #if !defined (__OLDXML)
-      CALL errore('cp_read_wfc','XSD under development',1)
+      CALL errore('cp_read_wfc','called in the wrong case',1)
 #else
       kunit = 1
       !
@@ -1996,7 +1909,7 @@ MODULE cp_restart
       !
       dirname = qexml_restart_dirname( tmp_dir, prefix, ndr ) 
       !
-      filename = TRIM( dirname ) // '/' // TRIM( xmlpun )
+      filename = TRIM( dirname ) // TRIM( xmlpun )
       !
       IF ( ionode ) &
          CALL iotk_open_read( iunpun, FILE = TRIM( filename ), &

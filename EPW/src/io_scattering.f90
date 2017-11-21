@@ -118,7 +118,11 @@
   IF (mpime.eq.ionode_id) THEN
     ! 
     ! First inquire if the file exists
+#if defined(__MPI)
     name1 = trim(tmp_dir) // trim(prefix) // '.Fi_all1'
+#else
+    name1 = trim(tmp_dir) // trim(prefix) // '.Fi_all'
+#endif 
     INQUIRE(file = name1, exist=exst)
     ! 
     IF (exst) THEN ! read the file
@@ -311,7 +315,7 @@
       WRITE(name1,'(a16,f6.2)') 'scattering_rate_', temp
     ENDIF
     OPEN(iufilscatt_rate,file=name1, status='old',iostat=ios)
-    WRITE(stdout,'(a16,a22)'),'     Open file: ',name1   
+    WRITE(stdout,'(a16,a22)') '     Open file: ',name1   
     ! There are two comment line at the beginning of the file
     READ(iufilscatt_rate,*) dummy1
     READ(iufilscatt_rate,*) dummy1
@@ -500,7 +504,11 @@
   IF (mpime.eq.ionode_id) THEN
     !
     ! First inquire if the file exists
+#if defined(__MPI)
     name1 = trim(tmp_dir) // trim(prefix) // '.sigma_restart1'
+#else
+    name1 = trim(tmp_dir) // trim(prefix) // '.sigma_restart'
+#endif    
     INQUIRE(file = name1, exist=exst)
     ! 
     IF (exst) THEN ! read the file
@@ -684,7 +692,11 @@
   IF (mpime.eq.ionode_id) THEN
     !
     ! First inquire if the file exists
+#if defined(__MPI)
     name1 = trim(tmp_dir) // trim(prefix) // '.tau_restart1'
+#else
+    name1 = trim(tmp_dir) // trim(prefix) // '.tau_restart'
+#endif 
     INQUIRE(file = name1, exist=exst)
     ! 
     IF (exst) THEN ! read the file

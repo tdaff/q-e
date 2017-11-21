@@ -1,7 +1,11 @@
-#!/bin/bash                                                                                                           #
-# Copyright (C) 2001 Quantum ESPRESSO                                                                                 #
-# This program is free software; you can redistribute it and/or                                                       # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2                                                      # of the License. See the file `License' in the root directory
+#!/bin/bash
+#
+# Copyright (C) 2001 Quantum ESPRESSO
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License. See the file `License' in the root directory
 # of the present distribution.
 
 include ./ENVIRONMENT
@@ -40,7 +44,7 @@ run-tests-serial : run-tests-cp-serial run-tests-pw-serial
 run-tests-parallel : run-tests-cp-parallel run-tests-pw-parallel
 
 
-run-tests-cp-serial : prolog pseudo
+run-tests-cp-serial : prolog pseudo 
 	env QE_USE_MPI=0 ${TESTCODE_DIR}/bin/testcode.py --verbose --category=cp_all
 
 run-tests-cp-parallel : prolog pseudo
@@ -52,13 +56,19 @@ run-tests-pw-serial : prolog pseudo
 run-tests-pw-parallel : prolog pseudo
 	env QE_USE_MPI=1 ${TESTCODE_DIR}/bin/testcode.py --verbose --category=pw_all
 
+run-tests-ph-serial : prolog pseudo
+	env QE_USE_MPI=0 ${TESTCODE_DIR}/bin/testcode.py --verbose --category=ph_all
+
+run-tests-ph-parallel : prolog pseudo
+	env QE_USE_MPI=1 ${TESTCODE_DIR}/bin/testcode.py --verbose --category=ph_all
+
 run-tests-epw-serial : prolog pseudo
 	env QE_USE_MPI=0 ${TESTCODE_DIR}/bin/testcode.py --verbose --category=epw_all
 
 run-tests-epw-parallel : prolog pseudo
 	env QE_USE_MPI=1 ${TESTCODE_DIR}/bin/testcode.py --verbose --category=epw_all
 
-run-travis : prolog pseudo
+run-travis : clean prolog pseudo
 	env QE_USE_MPI=0 ${TESTCODE_DIR}/bin/testcode.py --verbose --category=epw_base
 
 run-custom-test : run-custom-test-serial
@@ -79,7 +89,7 @@ run-tests-xsd-pw-serial : prolog pseudo
 		python ../validate_xsd_pw.py $$file; \
     done ; cd ..
 
-create-reference-cp : pseudo prolog
+create-reference-cp : pseudo prolog 
 	env QE_USE_MPI=0 ${TESTCODE_DIR}/bin/testcode.py --category=cp_all make-benchmarks
 
 create-reference-pw : pseudo prolog
@@ -89,7 +99,7 @@ create-reference-epw : pseudo prolog
 	env QE_USE_MPI=0 ${TESTCODE_DIR}/bin/testcode.py --category=epw_all make-benchmarks
 
 
-compare : compare-cp compare-pw compare-epw
+compare : compare-cp compare-pw compare-ph compare-epw
 
 compare-cp : prolog
 	${TESTCODE_DIR}/bin/testcode.py --category=cp_all  --verbose compare 2>&1 | tee out.CP.`date +%Y%m%d_%H%M%S`
@@ -97,22 +107,31 @@ compare-cp : prolog
 compare-pw : prolog
 	${TESTCODE_DIR}/bin/testcode.py --category=pw_all  --verbose compare 2>&1 | tee out.PW.`date +%Y%m%d_%H%M%S`
 
+compare-ph : prolog
+	${TESTCODE_DIR}/bin/testcode.py --category=ph_all  --verbose compare 2>&1 | tee out.PH.`date +%Y%m%d_%H%M%S`
+
 compare-epw : prolog
 	${TESTCODE_DIR}/bin/testcode.py --category=epw_all  --verbose compare 2>&1 | tee out.EPW.`date +%Y%m%d_%H%M%S`
 
 clean:
 	@for x in `find pw_* -name "test*"`; do rm -rf $$x; done
+	@for x in `find ph_* -name "test*"`; do rm -rf $$x; done
 	@for x in `find cp_* -name "test*"`; do rm -rf $$x; done
 	@for x in `find epw_* -name "test*"`; do rm -rf $$x; done
 	@for x in `find pw_* -name "CRASH"`; do rm -rf $$x; done
+	@for x in `find ph_* -name "CRASH*"`; do rm -rf $$x; done
 	@for x in `find cp_* -name "CRASH"`; do rm -rf $$x; done
 	@for x in `find epw_* -name "CRASH"`; do rm -rf $$x; done
 # Special case for 'pw_vc-relax' test-case
 	@rm -f pw_vc-relax/ave pw_vc-relax/e pw_vc-relax/tv pw_vc-relax/p pw_vc-relax/eal pw_vc-relax/avec
-# Special case for 'pw_langevin' test-case
-	@rm -f pw_langevin/trajectory-pwscf.xyz
-# Special cases for CP	
-	@rm -f cp_si/qe_input.xml cp_sio2/qe_input.xml cp_o2/qe_input.xml cp_h2o/qe_input.xml
+# Special case for 'noexe_langevin' test-case
+	@rm -f noexe_langevin/trajectory-pwscf.xyz
+# Special case for PH
+	@for x in `find ph_* -name "*dyn"`; do rm -rf $$x; done
+# Cleaning PH final files
+	@rm -rf ph_*/_ph0 ph_*/*.save ph_*/*.xml ph_*/a2F.* ph_*/*.dyn? ph_*/alpha2F.dat \
+		ph_*/dyna2F ph_*/elph.gamma* ph_*/gam.lines ph_*/lambda ph_*/lambda.dat \
+		ph_*/elph_dir ph_*/Al444.* ph_*/matdyn.modes ph_*/phonon.dos
 # Cleaning EPW final files
 	@rm -rf epw_*/_ph0 epw_*/*.save epw_*/*.wfc* epw_*/*.dyn* \
 		epw_*/*.qdos_25.00 epw_*/*.P epw_*/*.freq epw_*/*.wout \
@@ -124,7 +143,8 @@ clean:
 		epw_*/*.chk epw_*/*.phdos_proj epw_*/*..a2f epw_*/*.imag_aniso_gap_FS_25.00 \
 		epw_*/*.epmatwp epw_*/*.phdos epw_*/*.epwane epw_*/*.ephmat \
 		epw_*/*.fmt epw_*/*.H epw_*/*.epb* epw_*/*self epw_*/*.a2f epw_*/*.01 \
-		epw_*/*.kpt epw_*/*.gnu epw_*/*.eig epw_*/*.lambda_FS
+		epw_*/*.kpt epw_*/*.gnu epw_*/*.eig epw_*/*.lambda_FS epw_*/*.sigma_restart1 \
+		epw_*/specfun.phon epw_*/specfun_sup.phon
 # Special cases for EPW
 	@rm -rf epw_base/save epw_super/save
 

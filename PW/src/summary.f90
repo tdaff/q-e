@@ -399,6 +399,8 @@ SUBROUTINE summary()
      END IF
   END IF
   !
+  CALL output_tau( .true., .false.)
+  !
   FLUSH( stdout )
   !
   RETURN
